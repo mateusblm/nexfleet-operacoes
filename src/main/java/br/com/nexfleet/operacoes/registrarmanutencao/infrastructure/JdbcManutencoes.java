@@ -5,6 +5,8 @@ import br.com.nexfleet.operacoes.registrarmanutencao.application.*;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.*;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +14,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 @Repository
 public class JdbcManutencoes implements Manutencoes {
+  private static final Logger LOG = LoggerFactory.getLogger(JdbcManutencoes.class);
   private static final String SELECT = "SELECT id,veiculo_id,tipo,realizada_em,quilometragem,"
       + "descricao,oficina,valor,proxima_manutencao,criado_em,versao FROM operacoes.manutencao";
   private static final RowMapper<Dados> MAP = (rs, row) -> new Dados(
@@ -57,6 +60,27 @@ public class JdbcManutencoes implements Manutencoes {
     return Optional.of(atualizada);
   }
 
+  @Override
+  @Transactional
+  public boolean excluir(UUID id, UUID autor, Instant excluidoEm) {
+    var atual = jdbc.query("SELECT veiculo_id,versao FROM operacoes.manutencao "
+        + "WITH (UPDLOCK, ROWLOCK) WHERE id=?",
+        (rs, row) -> Map.entry(rs.getObject("veiculo_id", UUID.class), rs.getInt("versao")), id)
+        .stream().findFirst();
+    if (atual.isEmpty()) return false;
+    jdbc.update("DELETE FROM operacoes.manutencao WHERE id=?", id);
+    var campos = new LinkedHashMap<String, Object>();
+    campos.put("manutencaoId", id.toString());
+    campos.put("veiculoId", atual.get().getKey().toString());
+    campos.put("versao", atual.get().getValue() + 1);
+    campos.put("excluidoPor", autor.toString());
+    campos.put("excluidoEm", excluidoEm.toString());
+    UUID correlationId = gravarOutbox("ManutencaoExcluida", id, campos, utc(excluidoEm));
+    LOG.info("registro_excluido agregado=MANUTENCAO id={} autor={} correlationId={}",
+        id, autor, correlationId);
+    return true;
+  }
+
   /** Evento com os dados da manutenção na versão gravada, na transação corrente. */
   private void gravarEvento(String tipoEvento, Dados manutencao, Map<String, Object> extras,
       OffsetDateTime ocorridoEm) {
@@ -77,7 +101,7 @@ public class JdbcManutencoes implements Manutencoes {
   }
 
   /** Grava na outbox com eventoId e correlationId no payload (envelope dos eventos atuais). */
-  private void gravarOutbox(String tipoEvento, UUID agregadoId, Map<String, Object> campos,
+  private UUID gravarOutbox(String tipoEvento, UUID agregadoId, Map<String, Object> campos,
       OffsetDateTime ocorridoEm) {
     UUID eventoId = UUID.randomUUID();
     UUID correlationId = CorrelationIds.currentUuidOrNew();
@@ -90,6 +114,7 @@ public class JdbcManutencoes implements Manutencoes {
         + "VALUES (?,'MANUTENCAO',?,?,1,?,?,?)",
         eventoId, agregadoId, tipoEvento, correlationId, JSON.writeValueAsString(payload),
         ocorridoEm);
+    return correlationId;
   }
 
   private static OffsetDateTime utc(Instant instante) {

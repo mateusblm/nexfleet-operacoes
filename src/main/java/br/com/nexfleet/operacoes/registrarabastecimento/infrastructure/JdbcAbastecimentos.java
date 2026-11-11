@@ -88,6 +88,7 @@ public class JdbcAbastecimentos implements Abastecimentos {
     campos.put("litros", litros);
     campos.put("valorTotal", valorTotal);
     campos.put("quilometragem", quilometragem);
+    campos.put("versao", 1);
     campos.put("correlationId", correlationId.toString());
     return JSON.writeValueAsString(campos);
   }

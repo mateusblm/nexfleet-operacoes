@@ -28,4 +28,7 @@ public interface Manutencoes {
   Optional<Dados> atualizar(UUID id, TipoManutencao tipo, LocalDate realizadaEm,
       long quilometragem, String descricao, String oficina, BigDecimal valor,
       LocalDate proximaManutencao, UUID autor, Instant atualizadoEm);
+
+  /** Apaga a manutenção e registra o evento de exclusão; false se o id não existe. */
+  boolean excluir(UUID id, UUID autor, Instant excluidoEm);
 }

@@ -61,6 +61,12 @@ public class GerenciarManutencoes {
         .orElseThrow(GerenciarManutencoes::naoEncontrada);
   }
 
+  public void excluir(String perfil, UUID autor, UUID id) {
+    autorizar(perfil);
+    if (autor == null) throw new FalhaManutencao(PROIBIDO, "Identidade inválida.");
+    if (!manutencoes.excluir(id, autor, Instant.now(relogio))) throw naoEncontrada();
+  }
+
   private static FalhaManutencao naoEncontrada() {
     return new FalhaManutencao(NAO_ENCONTRADO, "Manutenção não encontrada.");
   }
