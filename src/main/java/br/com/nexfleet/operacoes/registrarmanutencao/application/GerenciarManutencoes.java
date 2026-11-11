@@ -11,6 +11,10 @@ public class GerenciarManutencoes {
       Long quilometragem, String descricao, String oficina, BigDecimal valor,
       LocalDate proximaManutencao) {}
 
+  /** Corpo da edição: o veículo da manutenção não muda. */
+  public record Edicao(TipoManutencao tipo, LocalDate realizadaEm, Long quilometragem,
+      String descricao, String oficina, BigDecimal valor, LocalDate proximaManutencao) {}
+
   private final Manutencoes manutencoes;
   private final VeiculosFrota frota;
   private final Clock relogio;
@@ -42,8 +46,40 @@ public class GerenciarManutencoes {
     return manutencoes.listar(veiculoId, pagina * tamanho, tamanho);
   }
 
+  public Manutencoes.Dados buscar(String perfil, UUID id) {
+    autorizar(perfil);
+    return manutencoes.buscar(id).orElseThrow(GerenciarManutencoes::naoEncontrada);
+  }
+
+  public Manutencoes.Dados atualizar(String perfil, UUID autor, UUID id, Edicao edicao) {
+    autorizar(perfil);
+    if (autor == null) throw new FalhaManutencao(PROIBIDO, "Identidade inválida.");
+    validar(edicao);
+    return manutencoes.atualizar(id, edicao.tipo(), edicao.realizadaEm(), edicao.quilometragem(),
+        edicao.descricao().trim(), edicao.oficina().trim(), edicao.valor(),
+        edicao.proximaManutencao(), autor, Instant.now(relogio))
+        .orElseThrow(GerenciarManutencoes::naoEncontrada);
+  }
+
+  public void excluir(String perfil, UUID autor, UUID id) {
+    autorizar(perfil);
+    if (autor == null) throw new FalhaManutencao(PROIBIDO, "Identidade inválida.");
+    if (!manutencoes.excluir(id, autor, Instant.now(relogio))) throw naoEncontrada();
+  }
+
+  private static FalhaManutencao naoEncontrada() {
+    return new FalhaManutencao(NAO_ENCONTRADO, "Manutenção não encontrada.");
+  }
+
   private void validar(Entrada entrada) {
-    if (entrada == null || entrada.veiculoId() == null || entrada.tipo() == null
+    if (entrada == null || entrada.veiculoId() == null)
+      throw new FalhaManutencao(INVALIDO, "Preencha todos os dados da manutenção.");
+    validar(new Edicao(entrada.tipo(), entrada.realizadaEm(), entrada.quilometragem(),
+        entrada.descricao(), entrada.oficina(), entrada.valor(), entrada.proximaManutencao()));
+  }
+
+  private void validar(Edicao entrada) {
+    if (entrada == null || entrada.tipo() == null
         || entrada.realizadaEm() == null || entrada.quilometragem() == null
         || entrada.descricao() == null || entrada.descricao().isBlank()
         || entrada.oficina() == null || entrada.oficina().isBlank()

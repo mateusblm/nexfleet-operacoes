@@ -5,6 +5,8 @@ import br.com.nexfleet.operacoes.registrarmanutencao.application.*;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.*;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,14 +14,15 @@ import tools.jackson.databind.json.JsonMapper;
 
 @Repository
 public class JdbcManutencoes implements Manutencoes {
+  private static final Logger LOG = LoggerFactory.getLogger(JdbcManutencoes.class);
   private static final String SELECT = "SELECT id,veiculo_id,tipo,realizada_em,quilometragem,"
-      + "descricao,oficina,valor,proxima_manutencao,criado_em FROM operacoes.manutencao";
+      + "descricao,oficina,valor,proxima_manutencao,criado_em,versao FROM operacoes.manutencao";
   private static final RowMapper<Dados> MAP = (rs, row) -> new Dados(
       rs.getObject("id", UUID.class), rs.getObject("veiculo_id", UUID.class),
       TipoManutencao.valueOf(rs.getString("tipo")), rs.getObject("realizada_em", LocalDate.class),
       rs.getLong("quilometragem"), rs.getString("descricao"), rs.getString("oficina"),
       rs.getBigDecimal("valor"), rs.getObject("proxima_manutencao", LocalDate.class),
-      rs.getObject("criado_em", OffsetDateTime.class).toInstant());
+      rs.getObject("criado_em", OffsetDateTime.class).toInstant(), rs.getInt("versao"));
 
   private static final JsonMapper JSON = JsonMapper.shared();
 
@@ -31,39 +34,91 @@ public class JdbcManutencoes implements Manutencoes {
   public Dados registrar(UUID id, UUID veiculoId, TipoManutencao tipo, LocalDate realizadaEm,
       long quilometragem, String descricao, String oficina, BigDecimal valor,
       LocalDate proximaManutencao, UUID autor, Instant criadoEm) {
-    var criacao = OffsetDateTime.ofInstant(criadoEm, ZoneOffset.UTC);
+    var criacao = utc(criadoEm);
     jdbc.update("INSERT INTO operacoes.manutencao(id,veiculo_id,tipo,realizada_em,"
         + "quilometragem,descricao,oficina,valor,proxima_manutencao,criado_por,criado_em) "
         + "VALUES (?,?,?,?,?,?,?,?,?,?,?)", id, veiculoId, tipo.name(), realizadaEm,
         quilometragem, descricao, oficina, valor, proximaManutencao, autor, criacao);
-    UUID eventoId = UUID.randomUUID();
-    UUID correlationId = CorrelationIds.currentUuidOrNew();
-    jdbc.update("INSERT INTO operacoes.outbox_evento(id,agregado_tipo,agregado_id,evento_tipo,"
-        + "evento_versao,correlation_id,payload,ocorrido_em) "
-        + "VALUES (?,'MANUTENCAO',?,'ManutencaoRegistrada',1,?,?,?)",
-        eventoId, id, correlationId,
-        payload(eventoId, id, veiculoId, tipo, realizadaEm, quilometragem, descricao, oficina,
-            valor, proximaManutencao, correlationId),
-        criacao);
-    return buscar(id).orElseThrow();
+    var registrada = buscar(id).orElseThrow();
+    gravarEvento("ManutencaoRegistrada", registrada, Map.of(), criacao);
+    return registrada;
   }
 
-  private static String payload(UUID eventoId, UUID id, UUID veiculoId, TipoManutencao tipo,
-      LocalDate realizadaEm, long quilometragem, String descricao, String oficina,
-      BigDecimal valor, LocalDate proximaManutencao, UUID correlationId) {
+  @Override
+  @Transactional
+  public Optional<Dados> atualizar(UUID id, TipoManutencao tipo, LocalDate realizadaEm,
+      long quilometragem, String descricao, String oficina, BigDecimal valor,
+      LocalDate proximaManutencao, UUID autor, Instant atualizadoEm) {
+    int alteradas = jdbc.update("UPDATE operacoes.manutencao SET tipo=?,realizada_em=?,"
+        + "quilometragem=?,descricao=?,oficina=?,valor=?,proxima_manutencao=?,versao=versao+1 "
+        + "WHERE id=?", tipo.name(), realizadaEm, quilometragem, descricao, oficina, valor,
+        proximaManutencao, id);
+    if (alteradas == 0) return Optional.empty();
+    var atualizada = buscar(id).orElseThrow();
+    gravarEvento("ManutencaoAtualizada", atualizada,
+        Map.of("atualizadoPor", autor.toString()), utc(atualizadoEm));
+    return Optional.of(atualizada);
+  }
+
+  @Override
+  @Transactional
+  public boolean excluir(UUID id, UUID autor, Instant excluidoEm) {
+    var atual = jdbc.query("SELECT veiculo_id,versao FROM operacoes.manutencao "
+        + "WITH (UPDLOCK, ROWLOCK) WHERE id=?",
+        (rs, row) -> Map.entry(rs.getObject("veiculo_id", UUID.class), rs.getInt("versao")), id)
+        .stream().findFirst();
+    if (atual.isEmpty()) return false;
+    jdbc.update("DELETE FROM operacoes.manutencao WHERE id=?", id);
     var campos = new LinkedHashMap<String, Object>();
-    campos.put("eventoId", eventoId.toString());
     campos.put("manutencaoId", id.toString());
-    campos.put("veiculoId", veiculoId.toString());
-    campos.put("tipo", tipo.name());
-    campos.put("realizadaEm", realizadaEm.toString());
-    campos.put("quilometragem", quilometragem);
-    campos.put("descricao", descricao);
-    campos.put("oficina", oficina);
-    campos.put("valor", valor);
-    campos.put("proximaManutencao", proximaManutencao == null ? null : proximaManutencao.toString());
-    campos.put("correlationId", correlationId.toString());
-    return JSON.writeValueAsString(campos);
+    campos.put("veiculoId", atual.get().getKey().toString());
+    campos.put("versao", atual.get().getValue() + 1);
+    campos.put("excluidoPor", autor.toString());
+    campos.put("excluidoEm", excluidoEm.toString());
+    UUID correlationId = gravarOutbox("ManutencaoExcluida", id, campos, utc(excluidoEm));
+    LOG.info("registro_excluido agregado=MANUTENCAO id={} autor={} correlationId={}",
+        id, autor, correlationId);
+    return true;
+  }
+
+  /** Evento com os dados da manutenção na versão gravada, na transação corrente. */
+  private void gravarEvento(String tipoEvento, Dados manutencao, Map<String, Object> extras,
+      OffsetDateTime ocorridoEm) {
+    var campos = new LinkedHashMap<String, Object>();
+    campos.put("manutencaoId", manutencao.id().toString());
+    campos.put("veiculoId", manutencao.veiculoId().toString());
+    campos.put("tipo", manutencao.tipo().name());
+    campos.put("realizadaEm", manutencao.realizadaEm().toString());
+    campos.put("quilometragem", manutencao.quilometragem());
+    campos.put("descricao", manutencao.descricao());
+    campos.put("oficina", manutencao.oficina());
+    campos.put("valor", manutencao.valor());
+    campos.put("proximaManutencao", manutencao.proximaManutencao() == null
+        ? null : manutencao.proximaManutencao().toString());
+    campos.put("versao", manutencao.versao());
+    campos.putAll(extras);
+    gravarOutbox(tipoEvento, manutencao.id(), campos, ocorridoEm);
+  }
+
+  /** Grava na outbox com eventoId e correlationId no payload (envelope dos eventos atuais). */
+  private UUID gravarOutbox(String tipoEvento, UUID agregadoId, Map<String, Object> campos,
+      OffsetDateTime ocorridoEm) {
+    UUID eventoId = UUID.randomUUID();
+    UUID correlationId = CorrelationIds.currentUuidOrNew();
+    var payload = new LinkedHashMap<String, Object>();
+    payload.put("eventoId", eventoId.toString());
+    payload.putAll(campos);
+    payload.put("correlationId", correlationId.toString());
+    jdbc.update("INSERT INTO operacoes.outbox_evento(id,agregado_tipo,agregado_id,evento_tipo,"
+        + "evento_versao,correlation_id,payload,ocorrido_em) "
+        + "VALUES (?,'MANUTENCAO',?,?,1,?,?,?)",
+        eventoId, agregadoId, tipoEvento, correlationId, JSON.writeValueAsString(payload),
+        ocorridoEm);
+    return correlationId;
+  }
+
+  private static OffsetDateTime utc(Instant instante) {
+    return OffsetDateTime.ofInstant(instante, ZoneOffset.UTC);
   }
 
   @Override
@@ -76,7 +131,8 @@ public class JdbcManutencoes implements Manutencoes {
         MAP, veiculoId, offset, limite);
   }
 
-  private Optional<Dados> buscar(UUID id) {
+  @Override
+  public Optional<Dados> buscar(UUID id) {
     return jdbc.query(SELECT + " WHERE id=?", MAP, id).stream().findFirst();
   }
 }

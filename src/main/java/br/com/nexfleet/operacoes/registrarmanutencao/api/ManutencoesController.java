@@ -3,6 +3,8 @@ package br.com.nexfleet.operacoes.registrarmanutencao.api;
 import br.com.nexfleet.operacoes.registrarmanutencao.application.*;
 import java.net.URI;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.*;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/v1/operacoes/manutencoes")
 public class ManutencoesController {
+  private static final Logger LOG = LoggerFactory.getLogger(ManutencoesController.class);
   private final GerenciarManutencoes manutencoes;
   public ManutencoesController(GerenciarManutencoes manutencoes) { this.manutencoes = manutencoes; }
 
@@ -23,6 +26,13 @@ public class ManutencoesController {
         .body(manutencoes.listar(perfil(jwt), veiculoId, pagina, tamanho));
   }
 
+  @GetMapping("/{id}")
+  public ResponseEntity<Manutencoes.Dados> buscar(@AuthenticationPrincipal Jwt jwt,
+      @PathVariable UUID id) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(manutencoes.buscar(perfil(jwt), id));
+  }
+
   @PostMapping
   public ResponseEntity<Manutencoes.Dados> registrar(@AuthenticationPrincipal Jwt jwt,
       @RequestHeader(value = "Authorization", required = false) String token,
@@ -30,6 +40,19 @@ public class ManutencoesController {
     var novo = manutencoes.registrar(perfil(jwt), autor(jwt), token, entrada);
     return ResponseEntity.created(URI.create("/api/v1/operacoes/manutencoes/" + novo.id()))
         .cacheControl(CacheControl.noStore()).body(novo);
+  }
+
+  @PutMapping("/{id}")
+  public ResponseEntity<Manutencoes.Dados> atualizar(@AuthenticationPrincipal Jwt jwt,
+      @PathVariable UUID id, @RequestBody GerenciarManutencoes.Edicao edicao) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(manutencoes.atualizar(perfil(jwt), autor(jwt), id, edicao));
+  }
+
+  @DeleteMapping("/{id}")
+  public ResponseEntity<Void> excluir(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+    manutencoes.excluir(perfil(jwt), autor(jwt), id);
+    return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
   }
 
   private String perfil(Jwt jwt) { return jwt == null ? null : jwt.getClaimAsString("perfil"); }
@@ -42,6 +65,7 @@ public class ManutencoesController {
 
   @ExceptionHandler(FalhaManutencao.class)
   public ResponseEntity<Map<String, String>> falha(FalhaManutencao erro) {
+    LOG.warn("falha_manutencao tipo={} message={}", erro.tipo(), erro.getMessage());
     int status = switch (erro.tipo()) {
       case PROIBIDO -> 403;
       case INVALIDO -> 422;
