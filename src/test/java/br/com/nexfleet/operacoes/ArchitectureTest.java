@@ -49,4 +49,25 @@ class ArchitectureTest {
             "..infrastructure..", "org.springframework.jdbc..", "jakarta.persistence..")
         .check(classes);
   }
+
+  @Test
+  void dominioNaoDependeDeOutrasCamadasNemDeFramework() {
+    noClasses()
+        .that()
+        .resideInAPackage("..domain..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAnyPackage(
+            "..application..",
+            "..infrastructure..",
+            "..api..",
+            "..config..",
+            "org.springframework..",
+            "jakarta..",
+            "javax.sql..",
+            "java.sql..",
+            "com.fasterxml.jackson..",
+            "tools.jackson..")
+        .check(classes);
+  }
 }
