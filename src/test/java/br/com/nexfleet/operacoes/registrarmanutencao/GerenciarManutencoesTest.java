@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import br.com.nexfleet.operacoes.registrarmanutencao.application.*;
+import br.com.nexfleet.operacoes.registrarmanutencao.domain.TipoManutencao;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.UUID;

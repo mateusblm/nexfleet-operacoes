@@ -45,19 +45,22 @@ flowchart LR
 
 ## Arquitetura
 
-**Clean Architecture + Vertical Slice.** Cada caso de uso é uma fatia em `br.com.nexfleet.operacoes`. As regras de negócio ficam nos casos de uso da camada `application`; o serviço não tem pacote `domain` separado.
+**Clean Architecture + Vertical Slice.** Cada caso de uso é uma fatia em `br.com.nexfleet.operacoes`. As regras de negócio puras ficam em `domain` (sem Spring, JDBC nem Jackson); `application` orquestra os casos de uso e define as portas; `infrastructure` e `api` são adaptadores.
 
 | Fatia | Camadas | Responsabilidade |
 |---|---|---|
-| `registrarabastecimento` | `api`, `application`, `infrastructure` | Registrar e listar abastecimentos; hodômetro; validação do vínculo em Frota |
-| `registrarmanutencao` | `api`, `application`, `infrastructure` | Registrar e listar manutenções; validação do veículo em Frota |
+| `registrarabastecimento` | `api`, `application`, `domain`, `infrastructure` | Registrar, consultar, editar e excluir abastecimentos; hodômetro; validação do vínculo em Frota |
+| `registrarmanutencao` | `api`, `application`, `domain`, `infrastructure` | Registrar, consultar, editar e excluir manutenções; validação do veículo em Frota |
 | `publicareventos` | `application`, `infrastructure` | Publicar a outbox no Service Bus ou no RabbitMQ |
 | `consultarservico` | `api`, `application`, `infrastructure` | Informações do serviço e verificação do banco |
+
+No `domain` ficam `TipoManutencao`, as validações do cadastro e da edição (`DetalhesManutencao`, `MedicaoAbastecimento`), a faixa de quilometragem entre vizinhos (`FaixaQuilometragem`), a regra do hodômetro e o cálculo da versão. `publicareventos` e `consultarservico` são técnicos e não têm `domain`.
 
 Pacotes técnicos: `config` (segurança, JWKS, OpenAPI e composição) e `observability` (correlação).
 
 Regras verificadas pelo ArchUnit (`ArchitectureTest`):
 
+- `domain` não depende de `application`, `infrastructure`, `api`, `config`, Spring, Jakarta, JDBC nem Jackson;
 - `application` não depende de Spring, JPA, `infrastructure` nem `api`;
 - `api` não acessa `infrastructure` nem JDBC diretamente;
 - nenhuma classe importa código interno de outros serviços.

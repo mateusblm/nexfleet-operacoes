@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import br.com.nexfleet.operacoes.SqlServerIntegracao;
 import br.com.nexfleet.operacoes.registrarmanutencao.api.ManutencoesController;
 import br.com.nexfleet.operacoes.registrarmanutencao.application.*;
+import br.com.nexfleet.operacoes.registrarmanutencao.domain.TipoManutencao;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.UUID;

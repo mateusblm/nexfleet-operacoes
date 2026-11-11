@@ -2,6 +2,7 @@ package br.com.nexfleet.operacoes.registrarabastecimento.application;
 
 import static br.com.nexfleet.operacoes.registrarabastecimento.application.FalhaAbastecimento.Tipo.*;
 
+import br.com.nexfleet.operacoes.registrarabastecimento.domain.*;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
@@ -27,14 +28,13 @@ public class GerenciarAbastecimentos {
   public Abastecimentos.Dados registrar(String perfil, UUID autor, String token, Entrada entrada) {
     autorizar(perfil);
     if (autor == null) throw new FalhaAbastecimento(PROIBIDO, "Identidade inválida.");
-    validar(entrada);
+    var medicao = validar(entrada);
     if (!frota.operacaoPermitida(token, entrada.veiculoId(), entrada.motoristaId(), entrada.realizadoEm()))
       throw new FalhaAbastecimento(INVALIDO,
           "Veículo e motorista precisam ter vínculo válido na data informada.");
     return abastecimentos.registrar(UUID.randomUUID(), entrada.veiculoId(), entrada.motoristaId(),
-        entrada.realizadoEm(), entrada.combustivel().trim().toUpperCase(Locale.ROOT),
-        entrada.litros(), entrada.valorTotal(), entrada.quilometragem(), autor,
-        Instant.now(relogio));
+        entrada.realizadoEm(), medicao.combustivel(), medicao.litros(), medicao.valorTotal(),
+        medicao.quilometragem(), autor, Instant.now(relogio));
   }
 
   public List<Abastecimentos.Dados> listar(String perfil, UUID veiculoId, int pagina, int tamanho) {
@@ -53,10 +53,10 @@ public class GerenciarAbastecimentos {
   public Abastecimentos.Dados atualizar(String perfil, UUID autor, UUID id, Edicao edicao) {
     autorizar(perfil);
     if (autor == null) throw new FalhaAbastecimento(PROIBIDO, "Identidade inválida.");
-    validar(edicao);
-    return abastecimentos.atualizar(id, edicao.combustivel().trim().toUpperCase(Locale.ROOT),
-        edicao.litros(), edicao.valorTotal(), edicao.quilometragem(), autor,
-        Instant.now(relogio)).orElseThrow(GerenciarAbastecimentos::naoEncontrado);
+    var medicao = validar(edicao);
+    return abastecimentos.atualizar(id, medicao.combustivel(), medicao.litros(),
+        medicao.valorTotal(), medicao.quilometragem(), autor, Instant.now(relogio))
+        .orElseThrow(GerenciarAbastecimentos::naoEncontrado);
   }
 
   public void excluir(String perfil, UUID autor, UUID id) {
@@ -69,37 +69,27 @@ public class GerenciarAbastecimentos {
     return new FalhaAbastecimento(NAO_ENCONTRADO, "Abastecimento não encontrado.");
   }
 
-  private void validar(Entrada entrada) {
-    if (entrada == null || entrada.veiculoId() == null || entrada.motoristaId() == null
-        || entrada.realizadoEm() == null || entrada.combustivel() == null
-        || entrada.combustivel().isBlank() || entrada.combustivel().trim().length() > 40
-        || entrada.litros() == null || entrada.valorTotal() == null
-        || entrada.quilometragem() == null)
-      throw new FalhaAbastecimento(INVALIDO, "Preencha todos os dados do abastecimento.");
-    if (entrada.realizadoEm().isAfter(Instant.now(relogio)))
-      throw new FalhaAbastecimento(INVALIDO, "A data do abastecimento não pode estar no futuro.");
-    validarMedicao(entrada.litros(), entrada.valorTotal(), entrada.quilometragem());
+  private MedicaoAbastecimento validar(Entrada entrada) {
+    if (entrada == null)
+      throw new FalhaAbastecimento(INVALIDO, MedicaoAbastecimento.PREENCHA);
+    try {
+      return Abastecimento.validarCadastro(entrada.veiculoId(), entrada.motoristaId(),
+          entrada.realizadoEm(), entrada.combustivel(), entrada.litros(), entrada.valorTotal(),
+          entrada.quilometragem(), Instant.now(relogio));
+    } catch (AbastecimentoInvalido e) {
+      throw new FalhaAbastecimento(INVALIDO, e.getMessage());
+    }
   }
 
-  private void validar(Edicao edicao) {
-    if (edicao == null || edicao.combustivel() == null || edicao.combustivel().isBlank()
-        || edicao.combustivel().trim().length() > 40 || edicao.litros() == null
-        || edicao.valorTotal() == null || edicao.quilometragem() == null)
-      throw new FalhaAbastecimento(INVALIDO, "Preencha todos os dados do abastecimento.");
-    validarMedicao(edicao.litros(), edicao.valorTotal(), edicao.quilometragem());
-  }
-
-  private void validarMedicao(BigDecimal litros, BigDecimal valorTotal, long quilometragem) {
-    validarDecimal(litros, "Litros");
-    validarDecimal(valorTotal, "Valor total");
-    if (quilometragem <= 0)
-      throw new FalhaAbastecimento(INVALIDO, "A quilometragem deve ser positiva.");
-  }
-
-  private void validarDecimal(BigDecimal valor, String campo) {
-    if (valor.signum() <= 0 || valor.scale() > 2 || valor.precision() - valor.scale() > 10)
-      throw new FalhaAbastecimento(INVALIDO,
-          campo + " deve ser positivo e possuir no máximo duas casas decimais.");
+  private MedicaoAbastecimento validar(Edicao edicao) {
+    if (edicao == null)
+      throw new FalhaAbastecimento(INVALIDO, MedicaoAbastecimento.PREENCHA);
+    try {
+      return MedicaoAbastecimento.de(edicao.combustivel(), edicao.litros(),
+          edicao.valorTotal(), edicao.quilometragem());
+    } catch (AbastecimentoInvalido e) {
+      throw new FalhaAbastecimento(INVALIDO, e.getMessage());
+    }
   }
 
   private void autorizar(String perfil) {

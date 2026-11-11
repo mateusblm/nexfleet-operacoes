@@ -1,5 +1,6 @@
 package br.com.nexfleet.operacoes.registrarabastecimento.application;
 
+import br.com.nexfleet.operacoes.registrarabastecimento.domain.Abastecimento;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
@@ -12,7 +13,7 @@ public interface Abastecimentos {
         String combustivel, BigDecimal litros, BigDecimal valorTotal,
         long quilometragem, Instant criadoEm) {
       this(id, veiculoId, motoristaId, realizadoEm, combustivel, litros, valorTotal,
-          quilometragem, criadoEm, 1);
+          quilometragem, criadoEm, Abastecimento.VERSAO_INICIAL);
     }
   }
 
