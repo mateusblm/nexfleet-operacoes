@@ -1,6 +1,6 @@
 # NexFleet Operações
 
-Microsserviço operacional do NexFleet: registra abastecimentos e manutenções, protege o hodômetro de cada veículo e publica eventos de forma confiável pelo padrão outbox.
+Microsserviço operacional do NexFleet: registra, consulta, edita e exclui abastecimentos e manutenções, protege o hodômetro de cada veículo e publica eventos de forma confiável pelo padrão outbox.
 
 [![CI](https://github.com/mateusblm/nexfleet-operacoes/actions/workflows/ci.yml/badge.svg)](https://github.com/mateusblm/nexfleet-operacoes/actions/workflows/ci.yml)
 [![Docker Hub](https://img.shields.io/docker/v/mateusblm/nexfleet-operacoes?sort=semver)](https://hub.docker.com/r/mateusblm/nexfleet-operacoes)
@@ -34,13 +34,16 @@ flowchart LR
 
 ## Funcionalidades
 
-- Registro e listagem paginada de abastecimentos, com filtro por veículo.
+- Registro, listagem paginada (com filtro por veículo), consulta por id, edição e exclusão de abastecimentos.
 - Abastecimento só com vínculo motorista ↔ veículo válido na data, conferido em Frota.
 - Hodômetro que **nunca regride**: quilometragem menor que a atual é recusada, com bloqueio de linha (`UPDLOCK, ROWLOCK`) contra corridas.
 - Data de abastecimento no futuro recusada.
-- Registro e listagem paginada de manutenções (`PREVENTIVA`, `CORRETIVA`, `REVISAO`, `TROCA_OLEO`, `TROCA_PNEUS`, `OUTROS`), com data de próxima manutenção opcional e posterior à atual; veículo precisa existir e estar ativo.
+- Edição do abastecimento restrita a combustível, litros, valor total e quilometragem; data, veículo e motorista ficam fixos (para mudá-los, exclui-se e registra-se de novo). A nova quilometragem precisa ficar estritamente entre a do abastecimento anterior e a do seguinte do mesmo veículo, e o hodômetro é recalculado pelo maior km restante na edição e na exclusão.
+- Registro e listagem paginada de manutenções (`PREVENTIVA`, `CORRETIVA`, `REVISAO`, `TROCA_OLEO`, `TROCA_PNEUS`, `OUTROS`), com data de próxima manutenção opcional e posterior à atual; veículo precisa existir e estar ativo. Consulta por id, edição (todos os campos com as regras do cadastro, menos o veículo) e exclusão.
+- Edição e exclusão com os mesmos perfis do registro (`ADMINISTRADOR` e `GESTOR_FROTA`); exclusão definitiva, com rastro no evento (`excluidoPor`, `excluidoEm`) e no log.
+- **Versão por registro**: começa em 1, cada edição soma 1 e a exclusão publica a versão atual + 1.
 - **Outbox transacional**: registro e evento gravados juntos; publicação em lotes com leitura concorrente segura (`UPDLOCK, READPAST`) e nova tentativa após falha.
-- Eventos `AbastecimentoRegistrado` v1 e `ManutencaoRegistrada` v1, com transporte selecionável: Service Bus (tópico `nexfleet-eventos-v1`, identidade gerenciada) ou RabbitMQ (exchange `nexfleet.eventos`, com confirmação de publicação).
+- Eventos versionados `AbastecimentoRegistrado`, `AbastecimentoAtualizado`, `AbastecimentoExcluido`, `ManutencaoRegistrada`, `ManutencaoAtualizada` e `ManutencaoExcluida` (todos v1), com transporte selecionável: Service Bus (tópico `nexfleet-eventos-v1`, identidade gerenciada) ou RabbitMQ (exchange `nexfleet.eventos`, com confirmação de publicação).
 - Readiness ligado ao banco: sem SQL disponível, responde `503`.
 
 ## Arquitetura
@@ -73,8 +76,14 @@ Rotas internas do serviço. A aplicação web as consome pelo BFF, que as expõe
 |---|---|---|---|
 | `GET` | `/api/v1/operacoes/abastecimentos?veiculoId=&pagina=&tamanho=` | `GET /api/v1/abastecimentos` | Listar abastecimentos (padrão: página 0, 20 itens) |
 | `POST` | `/api/v1/operacoes/abastecimentos` | `POST /api/v1/abastecimentos` | Registrar abastecimento |
+| `GET` | `/api/v1/operacoes/abastecimentos/{id}` | `GET /api/v1/abastecimentos/{id}` | Consultar abastecimento |
+| `PUT` | `/api/v1/operacoes/abastecimentos/{id}` | `PUT /api/v1/abastecimentos/{id}` | Editar combustível, litros, valor total e quilometragem |
+| `DELETE` | `/api/v1/operacoes/abastecimentos/{id}` | `DELETE /api/v1/abastecimentos/{id}` | Excluir abastecimento |
 | `GET` | `/api/v1/operacoes/manutencoes?veiculoId=&pagina=&tamanho=` | `GET /api/v1/manutencoes` | Listar manutenções |
 | `POST` | `/api/v1/operacoes/manutencoes` | `POST /api/v1/manutencoes` | Registrar manutenção |
+| `GET` | `/api/v1/operacoes/manutencoes/{id}` | `GET /api/v1/manutencoes/{id}` | Consultar manutenção |
+| `PUT` | `/api/v1/operacoes/manutencoes/{id}` | `PUT /api/v1/manutencoes/{id}` | Editar manutenção (menos o veículo) |
+| `DELETE` | `/api/v1/operacoes/manutencoes/{id}` | `DELETE /api/v1/manutencoes/{id}` | Excluir manutenção |
 | `GET` | `/api/v1/operacoes/info` | — | Informações do serviço |
 
 As listagens também alimentam o `GET /aggregated-data` do BFF. O OpenAPI do serviço é publicado em `/v3/api-docs` e reunido na Swagger UI do Gateway: **[Swagger UI em produção](https://apim-nexfleet-homolog-ukzjodf42myfe.azure-api.net/swagger-ui.html)** (seletor "Operações").
@@ -84,9 +93,13 @@ As listagens também alimentam o `GET /aggregated-data` do BFF. O OpenAPI do ser
 | Evento | Routing key (RabbitMQ) | Consumidores |
 |---|---|---|
 | `AbastecimentoRegistrado` v1 | `operacoes.abastecimento.registrado.v1` | Indicadores, Function de notificação |
+| `AbastecimentoAtualizado` v1 | `operacoes.abastecimento.atualizado.v1` | Indicadores |
+| `AbastecimentoExcluido` v1 | `operacoes.abastecimento.excluido.v1` | Indicadores |
 | `ManutencaoRegistrada` v1 | `operacoes.manutencao.registrada.v1` | Indicadores |
+| `ManutencaoAtualizada` v1 | `operacoes.manutencao.atualizada.v1` | Indicadores |
+| `ManutencaoExcluida` v1 | `operacoes.manutencao.excluida.v1` | Indicadores |
 
-Na nuvem, os dois eventos vão para o tópico `nexfleet-eventos-v1` do Service Bus. Contrato completo na [página AsyncAPI](https://white-mushroom-0cadda010.3.azurestaticapps.net/docs/eventos/).
+Todos levam o campo `versao` (ausente vale 1). Na nuvem, os seis eventos vão para o tópico `nexfleet-eventos-v1` do Service Bus. Contrato completo na [página AsyncAPI](https://white-mushroom-0cadda010.3.azurestaticapps.net/docs/eventos/).
 
 ## Stack
 
@@ -132,7 +145,7 @@ docker run --rm -p 8083:8080 \
   -e RABBITMQ_HOST=<host-do-rabbitmq> \
   -e RABBITMQ_USER=<usuário> \
   -e RABBITMQ_PASSWORD=<senha> \
-  mateusblm/nexfleet-operacoes:v1.0.0
+  mateusblm/nexfleet-operacoes:v1.1.0
 ```
 
 Para gerar a imagem a partir do código: `docker build -t mateusblm/nexfleet-operacoes:local .`
