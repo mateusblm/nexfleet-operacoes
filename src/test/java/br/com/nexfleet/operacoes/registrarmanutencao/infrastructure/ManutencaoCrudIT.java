@@ -160,6 +160,89 @@ class ManutencaoCrudIT extends SqlServerIntegracao {
         () -> assertEquals(0L, contar("operacoes.outbox_evento")));
   }
 
+  @Test
+  void exclusaoApagaRegistroEPublicaManutencaoExcluidaComVersaoSeguinte() {
+    var registrada = registrar();
+    controller.atualizar(jwt("GESTOR_FROTA"), registrada.id(), edicaoValida());
+    UUID gestor = UUID.fromString("66666666-6666-6666-6666-666666666666");
+
+    var resposta = controller.excluir(jwt("ADMINISTRADOR", gestor), registrada.id());
+    var falhaConsulta = assertThrows(FalhaManutencao.class,
+        () -> controller.buscar(jwt("GESTOR_FROTA"), registrada.id()));
+    var evento = jdbc.queryForMap("SELECT agregado_tipo,"
+        + " CAST(agregado_id AS NVARCHAR(36)) AS agregado_id, evento_versao,"
+        + " CAST(id AS NVARCHAR(36)) AS evento_id,"
+        + " CAST(correlation_id AS NVARCHAR(36)) AS correlation_id,"
+        + " JSON_VALUE(payload,'$.eventoId') AS evento_id_payload,"
+        + " JSON_VALUE(payload,'$.manutencaoId') AS manutencao_id,"
+        + " JSON_VALUE(payload,'$.veiculoId') AS veiculo_id,"
+        + " JSON_VALUE(payload,'$.versao') AS versao,"
+        + " JSON_VALUE(payload,'$.excluidoPor') AS excluido_por,"
+        + " JSON_VALUE(payload,'$.excluidoEm') AS excluido_em,"
+        + " JSON_VALUE(payload,'$.correlationId') AS correlation_payload,"
+        + " (SELECT COUNT(*) FROM OPENJSON(payload)) AS campos"
+        + " FROM operacoes.outbox_evento WHERE evento_tipo='ManutencaoExcluida'");
+
+    assertAll(
+        () -> assertEquals(204, resposta.getStatusCode().value()),
+        () -> assertEquals(404, controller.falha(falhaConsulta).getStatusCode().value()),
+        () -> assertEquals(0L, contar("operacoes.manutencao")),
+        () -> assertEquals("MANUTENCAO", evento.get("agregado_tipo")),
+        () -> assertEquals(registrada.id().toString(),
+            String.valueOf(evento.get("agregado_id")).toLowerCase()),
+        () -> assertEquals(1, ((Number) evento.get("evento_versao")).intValue()),
+        () -> assertEquals(String.valueOf(evento.get("evento_id")).toLowerCase(),
+            evento.get("evento_id_payload")),
+        () -> assertEquals(registrada.id().toString(), evento.get("manutencao_id")),
+        () -> assertEquals(VEICULO.toString(), evento.get("veiculo_id")),
+        () -> assertEquals("3", evento.get("versao")),
+        () -> assertEquals(gestor.toString(), evento.get("excluido_por")),
+        () -> assertEquals("2026-11-10T12:00:00Z", evento.get("excluido_em")),
+        () -> assertEquals(String.valueOf(evento.get("correlation_id")).toLowerCase(),
+            evento.get("correlation_payload")),
+        () -> assertEquals(7, ((Number) evento.get("campos")).intValue()));
+  }
+
+  @Test
+  void exclusaoDeIdInexistenteResponde404SemGravarEvento() {
+    var falha = assertThrows(FalhaManutencao.class,
+        () -> controller.excluir(jwt("GESTOR_FROTA"), UUID.randomUUID()));
+
+    assertAll(
+        () -> assertEquals(404, controller.falha(falha).getStatusCode().value()),
+        () -> assertEquals(0L, contar("operacoes.outbox_evento")));
+  }
+
+  @Test
+  void perfilSemPermissaoRecebe403EmConsultaEdicaoEExclusaoSemAlterarNada() {
+    var registrada = registrar();
+    long eventosAntes = contar("operacoes.outbox_evento");
+
+    var consulta = assertThrows(FalhaManutencao.class,
+        () -> controller.buscar(jwt("MOTORISTA"), registrada.id()));
+    var edicao = assertThrows(FalhaManutencao.class,
+        () -> controller.atualizar(jwt("MOTORISTA"), registrada.id(), edicaoValida()));
+    var exclusao = assertThrows(FalhaManutencao.class,
+        () -> controller.excluir(jwt("OPERADOR"), registrada.id()));
+
+    assertAll(
+        () -> assertEquals(403, controller.falha(consulta).getStatusCode().value()),
+        () -> assertEquals(403, controller.falha(edicao).getStatusCode().value()),
+        () -> assertEquals(403, controller.falha(exclusao).getStatusCode().value()),
+        () -> assertEquals(registrada,
+            controller.buscar(jwt("GESTOR_FROTA"), registrada.id()).getBody()),
+        () -> assertEquals(eventosAntes, contar("operacoes.outbox_evento")));
+  }
+
+  @Test
+  void registroPublicaManutencaoRegistradaComVersaoUm() {
+    var registrada = registrar();
+
+    assertEquals("1", jdbc.queryForObject("SELECT JSON_VALUE(payload,'$.versao')"
+        + " FROM operacoes.outbox_evento WHERE evento_tipo='ManutencaoRegistrada'"
+        + " AND agregado_id=?", String.class, registrada.id()));
+  }
+
   private static GerenciarManutencoes.Edicao edicaoValida() {
     return new GerenciarManutencoes.Edicao(TipoManutencao.REVISAO, LocalDate.parse("2026-11-08"),
         49_000L, "Revisão", "Oficina", new BigDecimal("100.00"), null);
