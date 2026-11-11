@@ -59,6 +59,12 @@ public class GerenciarAbastecimentos {
         Instant.now(relogio)).orElseThrow(GerenciarAbastecimentos::naoEncontrado);
   }
 
+  public void excluir(String perfil, UUID autor, UUID id) {
+    autorizar(perfil);
+    if (autor == null) throw new FalhaAbastecimento(PROIBIDO, "Identidade inválida.");
+    if (!abastecimentos.excluir(id, autor, Instant.now(relogio))) throw naoEncontrado();
+  }
+
   private static FalhaAbastecimento naoEncontrado() {
     return new FalhaAbastecimento(NAO_ENCONTRADO, "Abastecimento não encontrado.");
   }

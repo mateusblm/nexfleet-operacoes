@@ -5,6 +5,8 @@ import br.com.nexfleet.operacoes.registrarabastecimento.application.*;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.*;
 import org.springframework.stereotype.Repository;
@@ -13,6 +15,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 @Repository
 public class JdbcAbastecimentos implements Abastecimentos {
+  private static final Logger LOG = LoggerFactory.getLogger(JdbcAbastecimentos.class);
   private static final String SELECT =
       "SELECT id,veiculo_id,motorista_id,realizado_em,combustivel,litros,valor_total,"
           + "quilometragem,criado_em,versao FROM operacoes.abastecimento";
@@ -70,6 +73,27 @@ public class JdbcAbastecimentos implements Abastecimentos {
     gravarEvento("AbastecimentoAtualizado", atualizado,
         Map.of("atualizadoPor", autor.toString()), momento);
     return Optional.of(atualizado);
+  }
+
+  @Override
+  @Transactional
+  public boolean excluir(UUID id, UUID autor, Instant excluidoEm) {
+    var travado = travar(id);
+    if (travado.isEmpty()) return false;
+    var atual = travado.get();
+    var momento = utc(excluidoEm);
+    jdbc.update("DELETE FROM operacoes.abastecimento WHERE id=?", id);
+    recalcularHodometro(atual.veiculoId(), momento);
+    var campos = new LinkedHashMap<String, Object>();
+    campos.put("abastecimentoId", id.toString());
+    campos.put("veiculoId", atual.veiculoId().toString());
+    campos.put("versao", atual.versao() + 1);
+    campos.put("excluidoPor", autor.toString());
+    campos.put("excluidoEm", excluidoEm.toString());
+    UUID correlationId = gravarOutbox("AbastecimentoExcluido", id, campos, momento);
+    LOG.info("registro_excluido agregado=ABASTECIMENTO id={} autor={} correlationId={}",
+        id, autor, correlationId);
+    return true;
   }
 
   /**

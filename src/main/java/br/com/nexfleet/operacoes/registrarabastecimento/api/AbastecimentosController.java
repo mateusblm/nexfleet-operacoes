@@ -54,6 +54,12 @@ public class AbastecimentosController {
         .body(abastecimentos.atualizar(perfil(jwt), autor(jwt), id, edicao));
   }
 
+  @DeleteMapping("/{id}")
+  public ResponseEntity<Void> excluir(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+    abastecimentos.excluir(perfil(jwt), autor(jwt), id);
+    return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
+  }
+
   private String perfil(Jwt jwt) { return jwt == null ? null : jwt.getClaimAsString("perfil"); }
 
   private UUID autor(Jwt jwt) {

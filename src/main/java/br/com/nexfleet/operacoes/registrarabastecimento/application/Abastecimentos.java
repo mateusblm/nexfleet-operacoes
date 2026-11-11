@@ -31,4 +31,10 @@ public interface Abastecimentos {
    */
   Optional<Dados> atualizar(UUID id, String combustivel, BigDecimal litros,
       BigDecimal valorTotal, long quilometragem, UUID autor, Instant atualizadoEm);
+
+  /**
+   * Apaga o abastecimento, recalcula o hodômetro pelo maior km restante e registra o evento de
+   * exclusão; false se o id não existe.
+   */
+  boolean excluir(UUID id, UUID autor, Instant excluidoEm);
 }
