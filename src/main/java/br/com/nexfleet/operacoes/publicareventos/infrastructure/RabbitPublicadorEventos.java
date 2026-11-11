@@ -4,6 +4,9 @@ import br.com.nexfleet.operacoes.observability.CorrelationIds;
 import br.com.nexfleet.operacoes.publicareventos.application.EventoPendente;
 import br.com.nexfleet.operacoes.publicareventos.application.PublicadorEventos;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -15,6 +18,7 @@ import org.springframework.amqp.core.MessageBuilder;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -25,18 +29,41 @@ public class RabbitPublicadorEventos implements PublicadorEventos {
   private static final Logger LOG = LoggerFactory.getLogger(RabbitPublicadorEventos.class);
   private final RabbitTemplate rabbit;
   private final String exchange;
-  private final String abastecimentoRoutingKey;
-  private final String manutencaoRoutingKey;
+  private final Map<String, String> rotas;
 
+  /** Só os eventos de registro; os demais tipos ficam sem rota. */
+  public RabbitPublicadorEventos(
+      RabbitTemplate rabbit, String exchange, String abastecimentoRoutingKey,
+      String manutencaoRoutingKey) {
+    this(rabbit, exchange, abastecimentoRoutingKey, manutencaoRoutingKey,
+        null, null, null, null);
+  }
+
+  @Autowired
   public RabbitPublicadorEventos(
       RabbitTemplate rabbit,
       @Value("${nexfleet.eventos.exchange}") String exchange,
       @Value("${nexfleet.eventos.abastecimento-routing-key}") String abastecimentoRoutingKey,
-      @Value("${nexfleet.eventos.manutencao-routing-key}") String manutencaoRoutingKey) {
+      @Value("${nexfleet.eventos.manutencao-routing-key}") String manutencaoRoutingKey,
+      @Value("${nexfleet.eventos.abastecimento-atualizado-routing-key}")
+          String abastecimentoAtualizadoRoutingKey,
+      @Value("${nexfleet.eventos.abastecimento-excluido-routing-key}")
+          String abastecimentoExcluidoRoutingKey,
+      @Value("${nexfleet.eventos.manutencao-atualizada-routing-key}")
+          String manutencaoAtualizadaRoutingKey,
+      @Value("${nexfleet.eventos.manutencao-excluida-routing-key}")
+          String manutencaoExcluidaRoutingKey) {
     this.rabbit = rabbit;
     this.exchange = exchange;
-    this.abastecimentoRoutingKey = abastecimentoRoutingKey;
-    this.manutencaoRoutingKey = manutencaoRoutingKey;
+    var rotas = new HashMap<String, String>();
+    rotas.put("AbastecimentoRegistrado", abastecimentoRoutingKey);
+    rotas.put("ManutencaoRegistrada", manutencaoRoutingKey);
+    rotas.put("AbastecimentoAtualizado", abastecimentoAtualizadoRoutingKey);
+    rotas.put("AbastecimentoExcluido", abastecimentoExcluidoRoutingKey);
+    rotas.put("ManutencaoAtualizada", manutencaoAtualizadaRoutingKey);
+    rotas.put("ManutencaoExcluida", manutencaoExcluidaRoutingKey);
+    rotas.values().removeIf(Objects::isNull);
+    this.rotas = Map.copyOf(rotas);
   }
 
   @Override
@@ -81,10 +108,9 @@ public class RabbitPublicadorEventos implements PublicadorEventos {
   }
 
   private String routingKey(EventoPendente evento) {
-    return switch (evento.tipo()) {
-      case "AbastecimentoRegistrado" -> abastecimentoRoutingKey;
-      case "ManutencaoRegistrada" -> manutencaoRoutingKey;
-      default -> throw new IllegalArgumentException("Tipo de evento sem rota: " + evento.tipo());
-    };
+    String rota = rotas.get(evento.tipo());
+    if (rota == null)
+      throw new IllegalArgumentException("Tipo de evento sem rota: " + evento.tipo());
+    return rota;
   }
 }
