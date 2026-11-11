@@ -204,6 +204,94 @@ class AbastecimentoCrudIT extends SqlServerIntegracao {
         () -> assertEquals(0L, contar("operacoes.outbox_evento")));
   }
 
+  @Test
+  void exclusaoApagaRecalculaHodometroEPublicaAbastecimentoExcluidoComVersaoSeguinte() {
+    registrar(AGORA.minusSeconds(7200), 1_000L);
+    var ultimo = registrar(AGORA.minusSeconds(3600), 3_000L);
+    controller.atualizar(jwt("GESTOR_FROTA"), ultimo.id(), edicao(3_100L));
+    UUID gestor = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+
+    var resposta = controller.excluir(jwt("ADMINISTRADOR", gestor), ultimo.id());
+    var falhaConsulta = assertThrows(FalhaAbastecimento.class,
+        () -> controller.buscar(jwt("GESTOR_FROTA"), ultimo.id()));
+    var evento = jdbc.queryForMap("SELECT agregado_tipo,"
+        + " CAST(agregado_id AS NVARCHAR(36)) AS agregado_id, evento_versao,"
+        + " CAST(id AS NVARCHAR(36)) AS evento_id,"
+        + " CAST(correlation_id AS NVARCHAR(36)) AS correlation_id,"
+        + " JSON_VALUE(payload,'$.eventoId') AS evento_id_payload,"
+        + " JSON_VALUE(payload,'$.abastecimentoId') AS abastecimento_id,"
+        + " JSON_VALUE(payload,'$.veiculoId') AS veiculo_id,"
+        + " JSON_VALUE(payload,'$.versao') AS versao,"
+        + " JSON_VALUE(payload,'$.excluidoPor') AS excluido_por,"
+        + " JSON_VALUE(payload,'$.excluidoEm') AS excluido_em,"
+        + " JSON_VALUE(payload,'$.correlationId') AS correlation_payload,"
+        + " (SELECT COUNT(*) FROM OPENJSON(payload)) AS campos"
+        + " FROM operacoes.outbox_evento WHERE evento_tipo='AbastecimentoExcluido'");
+
+    assertAll(
+        () -> assertEquals(204, resposta.getStatusCode().value()),
+        () -> assertEquals(404, controller.falha(falhaConsulta).getStatusCode().value()),
+        () -> assertEquals(1L, contar("operacoes.abastecimento")),
+        () -> assertEquals(1_000L, hodometro()),
+        () -> assertEquals("ABASTECIMENTO", evento.get("agregado_tipo")),
+        () -> assertEquals(ultimo.id().toString(),
+            String.valueOf(evento.get("agregado_id")).toLowerCase()),
+        () -> assertEquals(1, ((Number) evento.get("evento_versao")).intValue()),
+        () -> assertEquals(String.valueOf(evento.get("evento_id")).toLowerCase(),
+            evento.get("evento_id_payload")),
+        () -> assertEquals(ultimo.id().toString(), evento.get("abastecimento_id")),
+        () -> assertEquals(VEICULO.toString(), evento.get("veiculo_id")),
+        () -> assertEquals("3", evento.get("versao")),
+        () -> assertEquals(gestor.toString(), evento.get("excluido_por")),
+        () -> assertEquals("2026-11-10T12:00:00Z", evento.get("excluido_em")),
+        () -> assertEquals(String.valueOf(evento.get("correlation_id")).toLowerCase(),
+            evento.get("correlation_payload")),
+        () -> assertEquals(7, ((Number) evento.get("campos")).intValue()));
+  }
+
+  @Test
+  void exclusaoDoUnicoAbastecimentoRemoveOHodometroDoVeiculo() {
+    var unico = registrar(AGORA.minusSeconds(3600), 1_500L);
+
+    controller.excluir(jwt("GESTOR_FROTA"), unico.id());
+
+    assertAll(
+        () -> assertEquals(0L, contar("operacoes.abastecimento")),
+        () -> assertNull(hodometro()));
+  }
+
+  @Test
+  void exclusaoDeIdInexistenteResponde404SemGravarEvento() {
+    var falha = assertThrows(FalhaAbastecimento.class,
+        () -> controller.excluir(jwt("GESTOR_FROTA"), UUID.randomUUID()));
+
+    assertAll(
+        () -> assertEquals(404, controller.falha(falha).getStatusCode().value()),
+        () -> assertEquals(0L, contar("operacoes.outbox_evento")));
+  }
+
+  @Test
+  void perfilSemPermissaoRecebe403EmConsultaEdicaoEExclusaoSemAlterarNada() {
+    var registrado = registrar(AGORA.minusSeconds(3600), 1_500L);
+    long eventosAntes = contar("operacoes.outbox_evento");
+
+    var consulta = assertThrows(FalhaAbastecimento.class,
+        () -> controller.buscar(jwt("MOTORISTA"), registrado.id()));
+    var edicao = assertThrows(FalhaAbastecimento.class,
+        () -> controller.atualizar(jwt("MOTORISTA"), registrado.id(), edicao(1_600L)));
+    var exclusao = assertThrows(FalhaAbastecimento.class,
+        () -> controller.excluir(jwt("OPERADOR"), registrado.id()));
+
+    assertAll(
+        () -> assertEquals(403, controller.falha(consulta).getStatusCode().value()),
+        () -> assertEquals(403, controller.falha(edicao).getStatusCode().value()),
+        () -> assertEquals(403, controller.falha(exclusao).getStatusCode().value()),
+        () -> assertEquals(registrado,
+            controller.buscar(jwt("GESTOR_FROTA"), registrado.id()).getBody()),
+        () -> assertEquals(1_500L, hodometro()),
+        () -> assertEquals(eventosAntes, contar("operacoes.outbox_evento")));
+  }
+
   private static GerenciarAbastecimentos.Edicao edicao(long km) {
     return new GerenciarAbastecimentos.Edicao("DIESEL S10", new BigDecimal("42.50"),
         new BigDecimal("289.90"), km);
