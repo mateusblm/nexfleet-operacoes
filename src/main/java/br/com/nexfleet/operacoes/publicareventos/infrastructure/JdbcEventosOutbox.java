@@ -20,16 +20,18 @@ public class JdbcEventosOutbox implements EventosOutbox {
 
   /**
    * Bloqueia até {@code limite} eventos pendentes para a transação corrente. UPDLOCK segura as
-   * linhas até o commit e READPAST pula as que outro publicador já bloqueou. A ordenação segue
-   * as chaves de {@code ix_outbox_pendente} para dispensar o Sort: com ele, o TOP só corta
-   * depois de ler (e bloquear) todos os pendentes, e um segundo publicador não acharia nada.
+   * linhas até o commit e READPAST pula as que outro publicador já bloqueou. O hint de índice e
+   * a ordem (proxima_tentativa_em, ocorrido_em, id) casam com {@code ix_outbox_pendente} para o
+   * plano dispensar o Sort: com ele, o TOP só corta depois de ler (e bloquear) todos os
+   * pendentes, e um segundo publicador não acharia nada (READPAST deixaria de dividir o lote).
    */
   @Override
   public List<EventoPendente> bloquearPendentes(int limite, Instant agora) {
     return jdbc.query(
         "SELECT TOP (?) id,agregado_tipo,agregado_id,evento_tipo,evento_versao,correlation_id,"
             + "payload,ocorrido_em,tentativas "
-            + "FROM operacoes.outbox_evento WITH (UPDLOCK, READPAST, ROWLOCK) "
+            + "FROM operacoes.outbox_evento "
+            + "WITH (INDEX(ix_outbox_pendente), UPDLOCK, READPAST, ROWLOCK) "
             + "WHERE publicado_em IS NULL AND proxima_tentativa_em<=? "
             + "ORDER BY proxima_tentativa_em,ocorrido_em,id",
         (rs, row) -> new EventoPendente(
