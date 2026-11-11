@@ -27,6 +27,13 @@ public class AbastecimentosController {
         .body(abastecimentos.listar(perfil(jwt), veiculoId, pagina, tamanho));
   }
 
+  @GetMapping("/{id}")
+  public ResponseEntity<Abastecimentos.Dados> buscar(@AuthenticationPrincipal Jwt jwt,
+      @PathVariable UUID id) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(abastecimentos.buscar(perfil(jwt), id));
+  }
+
   @PostMapping
   public ResponseEntity<Abastecimentos.Dados> registrar(
       @AuthenticationPrincipal Jwt jwt,

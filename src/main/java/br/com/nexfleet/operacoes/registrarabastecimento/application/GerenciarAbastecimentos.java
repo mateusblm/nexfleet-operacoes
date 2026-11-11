@@ -41,6 +41,15 @@ public class GerenciarAbastecimentos {
     return abastecimentos.listar(veiculoId, pagina * tamanho, tamanho);
   }
 
+  public Abastecimentos.Dados buscar(String perfil, UUID id) {
+    autorizar(perfil);
+    return abastecimentos.buscar(id).orElseThrow(GerenciarAbastecimentos::naoEncontrado);
+  }
+
+  private static FalhaAbastecimento naoEncontrado() {
+    return new FalhaAbastecimento(NAO_ENCONTRADO, "Abastecimento não encontrado.");
+  }
+
   private void validar(Entrada entrada) {
     if (entrada == null || entrada.veiculoId() == null || entrada.motoristaId() == null
         || entrada.realizadoEm() == null || entrada.combustivel() == null

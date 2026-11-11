@@ -15,14 +15,14 @@ import tools.jackson.databind.json.JsonMapper;
 public class JdbcAbastecimentos implements Abastecimentos {
   private static final String SELECT =
       "SELECT id,veiculo_id,motorista_id,realizado_em,combustivel,litros,valor_total,"
-          + "quilometragem,criado_em FROM operacoes.abastecimento";
+          + "quilometragem,criado_em,versao FROM operacoes.abastecimento";
   private static final RowMapper<Dados> MAP = (rs, row) -> new Dados(
       rs.getObject("id", UUID.class), rs.getObject("veiculo_id", UUID.class),
       rs.getObject("motorista_id", UUID.class),
       rs.getObject("realizado_em", OffsetDateTime.class).toInstant(),
       rs.getString("combustivel"), rs.getBigDecimal("litros"),
       rs.getBigDecimal("valor_total"), rs.getLong("quilometragem"),
-      rs.getObject("criado_em", OffsetDateTime.class).toInstant());
+      rs.getObject("criado_em", OffsetDateTime.class).toInstant(), rs.getInt("versao"));
 
   private static final JsonMapper JSON = JsonMapper.shared();
 
@@ -103,7 +103,8 @@ public class JdbcAbastecimentos implements Abastecimentos {
         MAP, veiculoId, offset, limite);
   }
 
-  private Optional<Dados> buscar(UUID id) {
+  @Override
+  public Optional<Dados> buscar(UUID id) {
     return jdbc.query(SELECT + " WHERE id=?", MAP, id).stream().findFirst();
   }
 }
