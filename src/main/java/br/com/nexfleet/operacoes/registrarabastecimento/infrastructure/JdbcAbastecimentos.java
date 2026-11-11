@@ -2,6 +2,7 @@ package br.com.nexfleet.operacoes.registrarabastecimento.infrastructure;
 
 import br.com.nexfleet.operacoes.observability.CorrelationIds;
 import br.com.nexfleet.operacoes.registrarabastecimento.application.*;
+import br.com.nexfleet.operacoes.registrarabastecimento.domain.*;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
@@ -39,9 +40,11 @@ public class JdbcAbastecimentos implements Abastecimentos {
       String combustivel, BigDecimal litros, BigDecimal valorTotal, long quilometragem,
       UUID autor, Instant criadoEm) {
     Long atual = travarHodometro(veiculoId);
-    if (atual != null && quilometragem < atual)
-      throw new FalhaAbastecimento(FalhaAbastecimento.Tipo.INVALIDO,
-          "A quilometragem não pode ser menor que o hodômetro atual de " + atual + " km.");
+    try {
+      Abastecimento.validarContraHodometro(atual, quilometragem);
+    } catch (AbastecimentoInvalido e) {
+      throw new FalhaAbastecimento(FalhaAbastecimento.Tipo.INVALIDO, e.getMessage());
+    }
     var data = utc(realizadoEm);
     var criacao = utc(criadoEm);
     jdbc.update("INSERT INTO operacoes.abastecimento"
@@ -63,7 +66,11 @@ public class JdbcAbastecimentos implements Abastecimentos {
     var travado = travar(id);
     if (travado.isEmpty()) return Optional.empty();
     var atual = travado.get();
-    validarEntreVizinhos(atual, quilometragem);
+    try {
+      faixaEntreVizinhos(atual).validar(quilometragem);
+    } catch (AbastecimentoInvalido e) {
+      throw new FalhaAbastecimento(FalhaAbastecimento.Tipo.INVALIDO, e.getMessage());
+    }
     var momento = utc(atualizadoEm);
     jdbc.update("UPDATE operacoes.abastecimento SET combustivel=?,litros=?,valor_total=?,"
         + "quilometragem=?,versao=versao+1 WHERE id=?",
@@ -87,7 +94,7 @@ public class JdbcAbastecimentos implements Abastecimentos {
     var campos = new LinkedHashMap<String, Object>();
     campos.put("abastecimentoId", id.toString());
     campos.put("veiculoId", atual.veiculoId().toString());
-    campos.put("versao", atual.versao() + 1);
+    campos.put("versao", Abastecimento.versaoSeguinte(atual.versao()));
     campos.put("excluidoPor", autor.toString());
     campos.put("excluidoEm", excluidoEm.toString());
     UUID correlationId = gravarOutbox("AbastecimentoExcluido", id, campos, momento);
@@ -117,8 +124,8 @@ public class JdbcAbastecimentos implements Abastecimentos {
         Long.class, veiculoId);
   }
 
-  /** Km estritamente entre o abastecimento anterior e o seguinte (realizado_em, depois id). */
-  private void validarEntreVizinhos(Dados atual, long quilometragem) {
+  /** Km do abastecimento anterior e do seguinte do mesmo veículo (realizado_em, depois id). */
+  private FaixaQuilometragem faixaEntreVizinhos(Dados atual) {
     var data = utc(atual.realizadoEm());
     var anterior = jdbc.query("SELECT TOP 1 quilometragem FROM operacoes.abastecimento "
         + "WHERE veiculo_id=? AND (realizado_em<? OR (realizado_em=? AND id<?)) "
@@ -130,14 +137,7 @@ public class JdbcAbastecimentos implements Abastecimentos {
         + "ORDER BY realizado_em,id",
         (rs, row) -> rs.getLong(1), atual.veiculoId(), data, data, atual.id())
         .stream().findFirst();
-    if (anterior.isPresent() && quilometragem <= anterior.get())
-      throw new FalhaAbastecimento(FalhaAbastecimento.Tipo.INVALIDO,
-          "A quilometragem deve ser maior que a do abastecimento anterior, de "
-              + anterior.get() + " km.");
-    if (seguinte.isPresent() && quilometragem >= seguinte.get())
-      throw new FalhaAbastecimento(FalhaAbastecimento.Tipo.INVALIDO,
-          "A quilometragem deve ser menor que a do abastecimento seguinte, de "
-              + seguinte.get() + " km.");
+    return new FaixaQuilometragem(anterior.orElse(null), seguinte.orElse(null));
   }
 
   /** Hodômetro = maior km dos abastecimentos do veículo; sem linha se não restar nenhum. */
