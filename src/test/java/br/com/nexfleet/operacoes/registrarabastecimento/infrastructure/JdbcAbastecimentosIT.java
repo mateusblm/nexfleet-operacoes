@@ -134,7 +134,7 @@ class JdbcAbastecimentosIT extends SqlServerIntegracao {
         () -> assertEquals("11111111-1111-1111-1111-111111111111", evento.get("veiculo_id")),
         () -> assertEquals("22222222-2222-2222-2222-222222222222", evento.get("motorista_id")),
         () -> assertEquals("2026-11-08T11:00:00Z", evento.get("realizado_em")),
-        () -> assertEquals("Diesel S10", evento.get("combustivel")),
+        () -> assertEquals("DIESEL S10", evento.get("combustivel")),
         () -> assertEquals("42.50", evento.get("litros")),
         () -> assertEquals("289.90", evento.get("valor_total")),
         () -> assertEquals("1500", evento.get("quilometragem")),
