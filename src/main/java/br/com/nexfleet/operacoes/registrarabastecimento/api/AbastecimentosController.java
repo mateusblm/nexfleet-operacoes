@@ -3,6 +3,8 @@ package br.com.nexfleet.operacoes.registrarabastecimento.api;
 import br.com.nexfleet.operacoes.registrarabastecimento.application.*;
 import java.net.URI;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.*;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/v1/operacoes/abastecimentos")
 public class AbastecimentosController {
+  private static final Logger LOG = LoggerFactory.getLogger(AbastecimentosController.class);
   private final GerenciarAbastecimentos abastecimentos;
 
   public AbastecimentosController(GerenciarAbastecimentos abastecimentos) {
@@ -44,6 +47,13 @@ public class AbastecimentosController {
         .cacheControl(CacheControl.noStore()).body(novo);
   }
 
+  @PutMapping("/{id}")
+  public ResponseEntity<Abastecimentos.Dados> atualizar(@AuthenticationPrincipal Jwt jwt,
+      @PathVariable UUID id, @RequestBody GerenciarAbastecimentos.Edicao edicao) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(abastecimentos.atualizar(perfil(jwt), autor(jwt), id, edicao));
+  }
+
   private String perfil(Jwt jwt) { return jwt == null ? null : jwt.getClaimAsString("perfil"); }
 
   private UUID autor(Jwt jwt) {
@@ -55,6 +65,7 @@ public class AbastecimentosController {
 
   @ExceptionHandler(FalhaAbastecimento.class)
   public ResponseEntity<Map<String, String>> falha(FalhaAbastecimento error) {
+    LOG.warn("falha_abastecimento tipo={} message={}", error.tipo(), error.getMessage());
     int status = switch (error.tipo()) {
       case PROIBIDO -> 403;
       case INVALIDO -> 422;
