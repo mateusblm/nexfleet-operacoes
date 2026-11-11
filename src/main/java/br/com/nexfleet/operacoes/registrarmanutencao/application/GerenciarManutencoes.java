@@ -42,6 +42,15 @@ public class GerenciarManutencoes {
     return manutencoes.listar(veiculoId, pagina * tamanho, tamanho);
   }
 
+  public Manutencoes.Dados buscar(String perfil, UUID id) {
+    autorizar(perfil);
+    return manutencoes.buscar(id).orElseThrow(GerenciarManutencoes::naoEncontrada);
+  }
+
+  private static FalhaManutencao naoEncontrada() {
+    return new FalhaManutencao(NAO_ENCONTRADO, "Manutenção não encontrada.");
+  }
+
   private void validar(Entrada entrada) {
     if (entrada == null || entrada.veiculoId() == null || entrada.tipo() == null
         || entrada.realizadaEm() == null || entrada.quilometragem() == null

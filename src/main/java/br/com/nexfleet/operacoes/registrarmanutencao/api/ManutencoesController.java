@@ -23,6 +23,13 @@ public class ManutencoesController {
         .body(manutencoes.listar(perfil(jwt), veiculoId, pagina, tamanho));
   }
 
+  @GetMapping("/{id}")
+  public ResponseEntity<Manutencoes.Dados> buscar(@AuthenticationPrincipal Jwt jwt,
+      @PathVariable UUID id) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(manutencoes.buscar(perfil(jwt), id));
+  }
+
   @PostMapping
   public ResponseEntity<Manutencoes.Dados> registrar(@AuthenticationPrincipal Jwt jwt,
       @RequestHeader(value = "Authorization", required = false) String token,

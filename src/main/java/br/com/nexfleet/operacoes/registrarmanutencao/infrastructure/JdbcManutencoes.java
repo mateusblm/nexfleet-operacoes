@@ -13,13 +13,13 @@ import tools.jackson.databind.json.JsonMapper;
 @Repository
 public class JdbcManutencoes implements Manutencoes {
   private static final String SELECT = "SELECT id,veiculo_id,tipo,realizada_em,quilometragem,"
-      + "descricao,oficina,valor,proxima_manutencao,criado_em FROM operacoes.manutencao";
+      + "descricao,oficina,valor,proxima_manutencao,criado_em,versao FROM operacoes.manutencao";
   private static final RowMapper<Dados> MAP = (rs, row) -> new Dados(
       rs.getObject("id", UUID.class), rs.getObject("veiculo_id", UUID.class),
       TipoManutencao.valueOf(rs.getString("tipo")), rs.getObject("realizada_em", LocalDate.class),
       rs.getLong("quilometragem"), rs.getString("descricao"), rs.getString("oficina"),
       rs.getBigDecimal("valor"), rs.getObject("proxima_manutencao", LocalDate.class),
-      rs.getObject("criado_em", OffsetDateTime.class).toInstant());
+      rs.getObject("criado_em", OffsetDateTime.class).toInstant(), rs.getInt("versao"));
 
   private static final JsonMapper JSON = JsonMapper.shared();
 
@@ -76,7 +76,8 @@ public class JdbcManutencoes implements Manutencoes {
         MAP, veiculoId, offset, limite);
   }
 
-  private Optional<Dados> buscar(UUID id) {
+  @Override
+  public Optional<Dados> buscar(UUID id) {
     return jdbc.query(SELECT + " WHERE id=?", MAP, id).stream().findFirst();
   }
 }
