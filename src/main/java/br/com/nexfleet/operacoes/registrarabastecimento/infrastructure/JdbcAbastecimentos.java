@@ -63,7 +63,7 @@ public class JdbcAbastecimentos implements Abastecimentos {
     return buscar(id).orElseThrow();
   }
 
-  /** Cria o hodômetro zerado do veículo se ainda não existir (substitui ON CONFLICT). */
+  /** Cria o hodômetro zerado do veículo se ainda não existir (semeadura idempotente). */
   private void semearHodometro(UUID veiculoId) {
     try {
       jdbc.update("MERGE operacoes.hodometro WITH (HOLDLOCK) AS h "
