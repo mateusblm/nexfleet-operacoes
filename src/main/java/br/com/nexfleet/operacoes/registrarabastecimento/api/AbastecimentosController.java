@@ -3,6 +3,8 @@ package br.com.nexfleet.operacoes.registrarabastecimento.api;
 import br.com.nexfleet.operacoes.registrarabastecimento.application.*;
 import java.net.URI;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.*;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/v1/operacoes/abastecimentos")
 public class AbastecimentosController {
+  private static final Logger LOG = LoggerFactory.getLogger(AbastecimentosController.class);
   private final GerenciarAbastecimentos abastecimentos;
 
   public AbastecimentosController(GerenciarAbastecimentos abastecimentos) {
@@ -27,6 +30,13 @@ public class AbastecimentosController {
         .body(abastecimentos.listar(perfil(jwt), veiculoId, pagina, tamanho));
   }
 
+  @GetMapping("/{id}")
+  public ResponseEntity<Abastecimentos.Dados> buscar(@AuthenticationPrincipal Jwt jwt,
+      @PathVariable UUID id) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(abastecimentos.buscar(perfil(jwt), id));
+  }
+
   @PostMapping
   public ResponseEntity<Abastecimentos.Dados> registrar(
       @AuthenticationPrincipal Jwt jwt,
@@ -35,6 +45,19 @@ public class AbastecimentosController {
     var novo = abastecimentos.registrar(perfil(jwt), autor(jwt), token, entrada);
     return ResponseEntity.created(URI.create("/api/v1/operacoes/abastecimentos/" + novo.id()))
         .cacheControl(CacheControl.noStore()).body(novo);
+  }
+
+  @PutMapping("/{id}")
+  public ResponseEntity<Abastecimentos.Dados> atualizar(@AuthenticationPrincipal Jwt jwt,
+      @PathVariable UUID id, @RequestBody GerenciarAbastecimentos.Edicao edicao) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(abastecimentos.atualizar(perfil(jwt), autor(jwt), id, edicao));
+  }
+
+  @DeleteMapping("/{id}")
+  public ResponseEntity<Void> excluir(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+    abastecimentos.excluir(perfil(jwt), autor(jwt), id);
+    return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
   }
 
   private String perfil(Jwt jwt) { return jwt == null ? null : jwt.getClaimAsString("perfil"); }
@@ -48,6 +71,7 @@ public class AbastecimentosController {
 
   @ExceptionHandler(FalhaAbastecimento.class)
   public ResponseEntity<Map<String, String>> falha(FalhaAbastecimento error) {
+    LOG.warn("falha_abastecimento tipo={} message={}", error.tipo(), error.getMessage());
     int status = switch (error.tipo()) {
       case PROIBIDO -> 403;
       case INVALIDO -> 422;
