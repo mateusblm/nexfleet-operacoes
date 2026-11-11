@@ -1,5 +1,7 @@
 package br.com.nexfleet.operacoes.registrarmanutencao.application;
 
+import br.com.nexfleet.operacoes.registrarmanutencao.domain.Manutencao;
+import br.com.nexfleet.operacoes.registrarmanutencao.domain.TipoManutencao;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
@@ -12,7 +14,7 @@ public interface Manutencoes {
         long quilometragem, String descricao, String oficina, BigDecimal valor,
         LocalDate proximaManutencao, Instant criadoEm) {
       this(id, veiculoId, tipo, realizadaEm, quilometragem, descricao, oficina, valor,
-          proximaManutencao, criadoEm, 1);
+          proximaManutencao, criadoEm, Manutencao.VERSAO_INICIAL);
     }
   }
 

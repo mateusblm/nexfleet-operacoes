@@ -2,6 +2,8 @@ package br.com.nexfleet.operacoes.registrarmanutencao.infrastructure;
 
 import br.com.nexfleet.operacoes.observability.CorrelationIds;
 import br.com.nexfleet.operacoes.registrarmanutencao.application.*;
+import br.com.nexfleet.operacoes.registrarmanutencao.domain.Manutencao;
+import br.com.nexfleet.operacoes.registrarmanutencao.domain.TipoManutencao;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
@@ -72,7 +74,7 @@ public class JdbcManutencoes implements Manutencoes {
     var campos = new LinkedHashMap<String, Object>();
     campos.put("manutencaoId", id.toString());
     campos.put("veiculoId", atual.get().getKey().toString());
-    campos.put("versao", atual.get().getValue() + 1);
+    campos.put("versao", Manutencao.versaoSeguinte(atual.get().getValue()));
     campos.put("excluidoPor", autor.toString());
     campos.put("excluidoEm", excluidoEm.toString());
     UUID correlationId = gravarOutbox("ManutencaoExcluida", id, campos, utc(excluidoEm));
