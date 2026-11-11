@@ -23,4 +23,9 @@ public interface Manutencoes {
   List<Dados> listar(UUID veiculoId, int offset, int limite);
 
   Optional<Dados> buscar(UUID id);
+
+  /** Grava a edição, incrementa a versão e registra o evento; vazio se o id não existe. */
+  Optional<Dados> atualizar(UUID id, TipoManutencao tipo, LocalDate realizadaEm,
+      long quilometragem, String descricao, String oficina, BigDecimal valor,
+      LocalDate proximaManutencao, UUID autor, Instant atualizadoEm);
 }

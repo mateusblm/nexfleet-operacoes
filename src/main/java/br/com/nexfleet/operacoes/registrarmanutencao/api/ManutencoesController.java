@@ -39,6 +39,13 @@ public class ManutencoesController {
         .cacheControl(CacheControl.noStore()).body(novo);
   }
 
+  @PutMapping("/{id}")
+  public ResponseEntity<Manutencoes.Dados> atualizar(@AuthenticationPrincipal Jwt jwt,
+      @PathVariable UUID id, @RequestBody GerenciarManutencoes.Edicao edicao) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(manutencoes.atualizar(perfil(jwt), autor(jwt), id, edicao));
+  }
+
   private String perfil(Jwt jwt) { return jwt == null ? null : jwt.getClaimAsString("perfil"); }
   private UUID autor(Jwt jwt) {
     try { return jwt == null ? null : UUID.fromString(jwt.getSubject()); }

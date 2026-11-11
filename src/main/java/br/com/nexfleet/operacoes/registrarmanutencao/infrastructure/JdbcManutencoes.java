@@ -31,39 +31,69 @@ public class JdbcManutencoes implements Manutencoes {
   public Dados registrar(UUID id, UUID veiculoId, TipoManutencao tipo, LocalDate realizadaEm,
       long quilometragem, String descricao, String oficina, BigDecimal valor,
       LocalDate proximaManutencao, UUID autor, Instant criadoEm) {
-    var criacao = OffsetDateTime.ofInstant(criadoEm, ZoneOffset.UTC);
+    var criacao = utc(criadoEm);
     jdbc.update("INSERT INTO operacoes.manutencao(id,veiculo_id,tipo,realizada_em,"
         + "quilometragem,descricao,oficina,valor,proxima_manutencao,criado_por,criado_em) "
         + "VALUES (?,?,?,?,?,?,?,?,?,?,?)", id, veiculoId, tipo.name(), realizadaEm,
         quilometragem, descricao, oficina, valor, proximaManutencao, autor, criacao);
-    UUID eventoId = UUID.randomUUID();
-    UUID correlationId = CorrelationIds.currentUuidOrNew();
-    jdbc.update("INSERT INTO operacoes.outbox_evento(id,agregado_tipo,agregado_id,evento_tipo,"
-        + "evento_versao,correlation_id,payload,ocorrido_em) "
-        + "VALUES (?,'MANUTENCAO',?,'ManutencaoRegistrada',1,?,?,?)",
-        eventoId, id, correlationId,
-        payload(eventoId, id, veiculoId, tipo, realizadaEm, quilometragem, descricao, oficina,
-            valor, proximaManutencao, correlationId),
-        criacao);
-    return buscar(id).orElseThrow();
+    var registrada = buscar(id).orElseThrow();
+    gravarEvento("ManutencaoRegistrada", registrada, Map.of(), criacao);
+    return registrada;
   }
 
-  private static String payload(UUID eventoId, UUID id, UUID veiculoId, TipoManutencao tipo,
-      LocalDate realizadaEm, long quilometragem, String descricao, String oficina,
-      BigDecimal valor, LocalDate proximaManutencao, UUID correlationId) {
+  @Override
+  @Transactional
+  public Optional<Dados> atualizar(UUID id, TipoManutencao tipo, LocalDate realizadaEm,
+      long quilometragem, String descricao, String oficina, BigDecimal valor,
+      LocalDate proximaManutencao, UUID autor, Instant atualizadoEm) {
+    int alteradas = jdbc.update("UPDATE operacoes.manutencao SET tipo=?,realizada_em=?,"
+        + "quilometragem=?,descricao=?,oficina=?,valor=?,proxima_manutencao=?,versao=versao+1 "
+        + "WHERE id=?", tipo.name(), realizadaEm, quilometragem, descricao, oficina, valor,
+        proximaManutencao, id);
+    if (alteradas == 0) return Optional.empty();
+    var atualizada = buscar(id).orElseThrow();
+    gravarEvento("ManutencaoAtualizada", atualizada,
+        Map.of("atualizadoPor", autor.toString()), utc(atualizadoEm));
+    return Optional.of(atualizada);
+  }
+
+  /** Evento com os dados da manutenção na versão gravada, na transação corrente. */
+  private void gravarEvento(String tipoEvento, Dados manutencao, Map<String, Object> extras,
+      OffsetDateTime ocorridoEm) {
     var campos = new LinkedHashMap<String, Object>();
-    campos.put("eventoId", eventoId.toString());
-    campos.put("manutencaoId", id.toString());
-    campos.put("veiculoId", veiculoId.toString());
-    campos.put("tipo", tipo.name());
-    campos.put("realizadaEm", realizadaEm.toString());
-    campos.put("quilometragem", quilometragem);
-    campos.put("descricao", descricao);
-    campos.put("oficina", oficina);
-    campos.put("valor", valor);
-    campos.put("proximaManutencao", proximaManutencao == null ? null : proximaManutencao.toString());
-    campos.put("correlationId", correlationId.toString());
-    return JSON.writeValueAsString(campos);
+    campos.put("manutencaoId", manutencao.id().toString());
+    campos.put("veiculoId", manutencao.veiculoId().toString());
+    campos.put("tipo", manutencao.tipo().name());
+    campos.put("realizadaEm", manutencao.realizadaEm().toString());
+    campos.put("quilometragem", manutencao.quilometragem());
+    campos.put("descricao", manutencao.descricao());
+    campos.put("oficina", manutencao.oficina());
+    campos.put("valor", manutencao.valor());
+    campos.put("proximaManutencao", manutencao.proximaManutencao() == null
+        ? null : manutencao.proximaManutencao().toString());
+    campos.put("versao", manutencao.versao());
+    campos.putAll(extras);
+    gravarOutbox(tipoEvento, manutencao.id(), campos, ocorridoEm);
+  }
+
+  /** Grava na outbox com eventoId e correlationId no payload (envelope dos eventos atuais). */
+  private void gravarOutbox(String tipoEvento, UUID agregadoId, Map<String, Object> campos,
+      OffsetDateTime ocorridoEm) {
+    UUID eventoId = UUID.randomUUID();
+    UUID correlationId = CorrelationIds.currentUuidOrNew();
+    var payload = new LinkedHashMap<String, Object>();
+    payload.put("eventoId", eventoId.toString());
+    payload.putAll(campos);
+    payload.put("correlationId", correlationId.toString());
+    jdbc.update("INSERT INTO operacoes.outbox_evento(id,agregado_tipo,agregado_id,evento_tipo,"
+        + "evento_versao,correlation_id,payload,ocorrido_em) "
+        + "VALUES (?,'MANUTENCAO',?,?,1,?,?,?)",
+        eventoId, agregadoId, tipoEvento, correlationId, JSON.writeValueAsString(payload),
+        ocorridoEm);
+  }
+
+  private static OffsetDateTime utc(Instant instante) {
+    return OffsetDateTime.ofInstant(instante, ZoneOffset.UTC);
   }
 
   @Override
